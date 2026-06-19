@@ -17,6 +17,7 @@ import {
   isValidCountingMessage,
   recordCorrectCount,
 } from '../services/countingGameService.js';
+import { getAIConfig, generateAIResponse } from '../services/aiService.js';
 
 const MESSAGE_XP_RATE_LIMIT_ATTEMPTS = 12;
 const MESSAGE_XP_RATE_LIMIT_WINDOW_MS = 10000;
@@ -31,6 +32,11 @@ export default {
 
       const countingProcessed = await handleCountingGame(message, client);
       if (countingProcessed) {
+        return;
+      }
+
+      const aiProcessed = await handleAIChat(message, client);
+      if (aiProcessed) {
         return;
       }
 
@@ -219,5 +225,33 @@ async function handleLeveling(message, client) {
     }
   } catch (error) {
     logger.error('Error handling leveling for message:', error);
+  }
+}
+
+async function handleAIChat(message, client) {
+  try {
+    const config = await getAIConfig(message.guild.id);
+    if (!config.enabled) return false;
+
+    const isAiChannel = config.channel_id && message.channel.id === config.channel_id;
+    const isBotMentioned = message.mentions.has(client.user);
+
+    if (!isAiChannel && !isBotMentioned) return false;
+
+    const content = message.content.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
+    if (!content) return false;
+
+    await message.channel.sendTyping();
+
+    const response = await generateAIResponse(message.guild.id, content, config.system_prompt);
+
+    // If the response is over 2000 chars, we need to split it, but for now we'll just substring it to be safe
+    const safeResponse = response.length > 2000 ? response.substring(0, 1997) + '...' : response;
+
+    await message.reply({ content: safeResponse });
+    return true;
+  } catch (error) {
+    logger.error('Error handling AI chat:', error);
+    return false;
   }
 }
