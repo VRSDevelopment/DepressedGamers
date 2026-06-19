@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { logger } from '../utils/logger.js';
-import { pool } from './database.js';
+import { pgDb } from '../utils/database.js';
 
 let aiClient = null;
 
@@ -22,7 +22,7 @@ export const initAIClient = () => {
 
 export const getAIConfig = async (guildId) => {
   try {
-    const result = await pool.query(
+    const result = await pgDb.pool.query(
       'SELECT channel_id, enabled, system_prompt FROM ai_configs WHERE guild_id = $1',
       [guildId]
     );
@@ -38,7 +38,7 @@ export const getAIConfig = async (guildId) => {
 
 export const saveAIConfig = async (guildId, config) => {
   try {
-    await pool.query(
+    await pgDb.pool.query(
       `INSERT INTO ai_configs (guild_id, channel_id, enabled, system_prompt)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (guild_id)
