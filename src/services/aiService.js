@@ -97,7 +97,7 @@ export const generateAIResponse = async (message, userMessage, systemPrompt) => 
     });
 
     let response = await aiClient.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-1.5-flash',
         contents: contents,
         config: {
             systemInstruction: promptInstructions,
@@ -135,7 +135,7 @@ export const generateAIResponse = async (message, userMessage, systemPrompt) => 
               contents.push({ role: 'user', parts: [{ text: `SYSTEM LOG: Successfully disconnected ${targetMember.user.username} from their voice channel. Please confirm to the user.` }] });
               
               const followup = await aiClient.models.generateContent({
-                  model: 'gemini-2.5-flash',
+                  model: 'gemini-1.5-flash',
                   contents: contents,
                   config: { systemInstruction: promptInstructions }
               });
@@ -146,7 +146,7 @@ export const generateAIResponse = async (message, userMessage, systemPrompt) => 
               contents.push({ role: 'user', parts: [{ text: `SYSTEM LOG: I failed to disconnect the user due to a permission error: ${kickError.message}. The bot probably lacks 'Move Members' permission. Please apologize and tell the user.` }] });
               
               const followup = await aiClient.models.generateContent({
-                  model: 'gemini-2.5-flash',
+                  model: 'gemini-1.5-flash',
                   contents: contents,
                   config: { systemInstruction: promptInstructions }
               });
@@ -158,7 +158,7 @@ export const generateAIResponse = async (message, userMessage, systemPrompt) => 
             contents.push({ role: 'user', parts: [{ text: `SYSTEM LOG: Could not find any user matching "${targetUsername}" in any voice channel. Please tell the user.` }] });
             
             const followup = await aiClient.models.generateContent({
-                model: 'gemini-2.5-flash',
+                model: 'gemini-1.5-flash',
                 contents: contents,
                 config: { systemInstruction: promptInstructions }
             });
