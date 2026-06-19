@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { logger } from '../utils/logger.js';
-import { pool } from '../services/database.js';
+import { pool } from './database.js';
 
 let aiClient = null;
 
