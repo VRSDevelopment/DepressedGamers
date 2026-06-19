@@ -43,7 +43,7 @@ const MAX_HISTORY_LENGTH = 10;
 const callOpenRouter = async (messages) => {
   const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
     // We are using a highly stable free model from Meta to avoid 404s
-    model: 'meta-llama/llama-3.3-70b-instruct:free', 
+    model: 'openai/gpt-oss-120b:free', 
     messages: messages
   }, {
     headers: {
