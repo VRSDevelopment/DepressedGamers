@@ -380,6 +380,15 @@ class PostgreSQLDatabase {
                 value JSONB NOT NULL,
                 expires_at TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )`,
+            
+            `CREATE TABLE IF NOT EXISTS ai_configs (
+                guild_id VARCHAR(20) PRIMARY KEY,
+                channel_id VARCHAR(20) DEFAULT NULL,
+                enabled BOOLEAN DEFAULT false,
+                system_prompt TEXT DEFAULT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )`
         ];
 
@@ -416,7 +425,8 @@ class PostgreSQLDatabase {
             `CREATE INDEX IF NOT EXISTS idx_verification_audit_user_id ON ${pgConfig.tables.verification_audit}(user_id)`,
             `CREATE INDEX IF NOT EXISTS idx_verification_audit_created_at ON ${pgConfig.tables.verification_audit}(created_at)`,
             `CREATE INDEX IF NOT EXISTS idx_temp_data_expires_at ON ${pgConfig.tables.temp_data}(expires_at)`,
-            `CREATE INDEX IF NOT EXISTS idx_cache_data_expires_at ON ${pgConfig.tables.cache_data}(expires_at)`
+            `CREATE INDEX IF NOT EXISTS idx_cache_data_expires_at ON ${pgConfig.tables.cache_data}(expires_at)`,
+            `CREATE INDEX IF NOT EXISTS idx_ai_configs_guild_id ON ai_configs(guild_id)`
         ];
 
         for (const index of indexes) {
@@ -458,6 +468,7 @@ class PostgreSQLDatabase {
                 { name: 'update_giveaways_updated_at', table: pgConfig.tables.giveaways },
                 { name: 'update_tickets_updated_at', table: pgConfig.tables.tickets },
                 { name: 'update_afk_status_updated_at', table: pgConfig.tables.afk_status },
+                { name: 'update_ai_configs_updated_at', table: 'ai_configs' },
             ];
 
             const allowedTriggerIdentifiers = new Set(triggers.map(trigger => trigger.name));
