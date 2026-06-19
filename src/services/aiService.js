@@ -42,9 +42,8 @@ const MAX_HISTORY_LENGTH = 10;
 // Helper to make OpenRouter API calls
 const callOpenRouter = async (messages) => {
   const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
-    // You can change this to any free model on OpenRouter!
-    // Check https://openrouter.ai/models?max_price=0 for free models
-    model: 'google/gemini-2.0-flash-exp:free', 
+    // We are using a highly stable free model from Meta to avoid 404s
+    model: 'meta-llama/llama-3-8b-instruct:free', 
     messages: messages
   }, {
     headers: {
