@@ -135,7 +135,7 @@ export const generateAIResponse = async (message, userMessage, systemPrompt) => 
               contents.push({ role: 'user', parts: [{ text: `SYSTEM LOG: Successfully disconnected ${targetMember.user.username} from their voice channel. Please confirm to the user.` }] });
               
               const followup = await aiClient.models.generateContent({
-                  model: 'gemini-1.5-flash',
+                  model: 'gemini-1.5-flash-8b',
                   contents: contents,
                   config: { systemInstruction: promptInstructions }
               });
