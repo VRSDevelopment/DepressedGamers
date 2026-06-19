@@ -1,201 +1,67 @@
-// database.js
+// database.js — facade re-exporting split modules for backward compatibility
 
 import { pgDb } from './postgresDatabase.js';
-import { MemoryStorage } from './memoryStorage.js';
 import { logger } from './logger.js';
 import { BotConfig } from '../config/bot.js';
 import { normalizeGuildConfig, validateGuildConfigOrThrow } from './schemas.js';
 import { DEFAULT_GUILD_CONFIG } from './constants.js';
 
-class DatabaseWrapper {
-    constructor() {
-        this.initialized = false;
-        this.db = null;
-        this.useFallback = false;
-        this.connectionType = 'none';
-        this.degradedModeWarningShown = false;
-        this.degradedReason = null;
-    }
+export {
+    db,
+    initializeDatabase,
+    getFromDb,
+    setInDb,
+    deleteFromDb,
+} from './database/wrapper.js';
 
-    async initialize() {
-        if (this.initialized) {
-            return;
-        }
+export {
+    getGuildConfigKey,
+    getGuildBirthdaysKey,
+    getTicketKey,
+    getTicketCounterKey,
+    getInviteTrackingKey,
+    getMemberInvitesKey,
+    getInviteUsesKey,
+    getFakeAccountKey,
+    getEconomyKey,
+    getAFKKey,
+    getWelcomeConfigKey,
+    getLevelingKey,
+    getUserLevelKey,
+    getApplicationRolesKey,
+    getApplicationSettingsKey,
+    getUserApplicationsKey,
+    getApplicationKey,
+    getJoinToCreateConfigKey,
+    getJoinToCreateChannelsKey,
+} from './database/keys.js';
 
-        try {
-            logger.info('Attempting to connect to PostgreSQL...');
-            const pgConnected = await pgDb.connect();
-            if (pgConnected) {
-                this.db = pgDb;
-                this.connectionType = 'postgresql';
-                this.degradedReason = null;
-                logger.info('✅ PostgreSQL Database initialized - using persistent database');
-                this.initialized = true;
-                return;
-            }
+export {
+    getTicketData,
+    getOpenTicketCountForUser,
+    saveTicketData,
+    deleteTicketData,
+    getTicketCounter,
+    incrementTicketCounter,
+    getGuildTicketStats,
+} from './database/tickets.js';
 
-            const pgFailure = pgDb.getLastFailure?.();
-            if (pgFailure?.reason === 'SCHEMA_VERSION_MISMATCH') {
-                const schemaError = new Error(
-                    `Schema version mismatch detected (${pgFailure.message}). Run migrations before startup.`
-                );
-                schemaError.code = 'SCHEMA_VERSION_MISMATCH';
-                throw schemaError;
-            }
-        } catch (error) {
-            logger.warn('PostgreSQL connection failed:', error.message);
-
-            if (error.code === 'SCHEMA_VERSION_MISMATCH') {
-                throw error;
-            }
-        }
-
-        this.db = new MemoryStorage();
-        this.useFallback = true;
-        this.connectionType = 'memory';
-        this.degradedReason = 'POSTGRES_UNAVAILABLE';
-        logger.warn('⚠️ DATABASE DEGRADED MODE ENABLED - Using in-memory storage (data will be lost on restart)');
-        logger.warn('⚠️ Please check PostgreSQL connection and restart the bot when fixed');
-        this.initialized = true;
-        this.degradedModeWarningShown = true;
-    }
-
-    async set(key, value, ttl = null) {
-        if (this.useFallback) {
-            logger.debug(`[DEGRADED] Writing to memory: ${key}`);
-        }
-
-        if (typeof key === 'string' && /^guild:[^:]+:config$/.test(key)) {
-            const guildId = key.split(':')[1];
-            validateGuildConfigOrThrow(value, {
-                guildId,
-                errorCode: 'VALIDATION_FAILED'
-            });
-        }
-
-        return this.db.set(key, value, ttl);
-    }
-
-    async get(key, defaultValue = null) {
-        return this.db.get(key, defaultValue);
-    }
-
-    async delete(key) {
-        if (this.useFallback) {
-            logger.debug(`[DEGRADED] Deleting from memory: ${key}`);
-        }
-        return this.db.delete(key);
-    }
-
-    async list(prefix) {
-        return this.db.list(prefix);
-    }
-
-    async exists(key) {
-        if (this.db.exists) {
-            return this.db.exists(key);
-        }
-        const value = await this.db.get(key);
-        return value !== null;
-    }
-
-    async increment(key, amount = 1) {
-        if (this.useFallback) {
-            logger.debug(`[DEGRADED] Incrementing in memory: ${key}`);
-        }
-        if (this.db.increment) {
-            return this.db.increment(key, amount);
-        }
-        const current = await this.db.get(key, 0);
-        const newValue = current + amount;
-        await this.db.set(key, newValue);
-        return newValue;
-    }
-
-    async decrement(key, amount = 1) {
-        if (this.useFallback) {
-            logger.debug(`[DEGRADED] Decrementing in memory: ${key}`);
-        }
-        if (this.db.decrement) {
-            return this.db.decrement(key, amount);
-        }
-        const current = await this.db.get(key, 0);
-        const newValue = current - amount;
-        await this.db.set(key, newValue);
-        return newValue;
-    }
-
-    isDegraded() {
-        return this.useFallback;
-    }
-
-    isAvailable() {
-        return this.db && !this.useFallback;
-    }
-
-    getStatus() {
-        return {
-            initialized: this.initialized,
-            connectionType: this.connectionType,
-            isDegraded: this.useFallback,
-            isAvailable: this.isAvailable(),
-            degradedReason: this.degradedReason
-        };
-    }
-
-    getConnectionType() {
-        return this.connectionType;
-    }
-}
-
-export const db = new DatabaseWrapper();
-
-export async function initializeDatabase() {
-    try {
-        logger.info("Initializing Database (PostgreSQL > Memory fallback)...");
-        await db.initialize();
-        logger.info("✅ Database initialized");
-        return { db };
-    } catch (error) {
-        logger.error("❌ Database Initialization Error:", error);
-
-        if (error.code === 'SCHEMA_VERSION_MISMATCH') {
-            throw error;
-        }
-
-        return { db };
-    }
-}
-
-export async function getFromDb(key, defaultValue = null) {
-    try {
-        const value = await db.get(key);
-        return value === null ? defaultValue : value;
-    } catch (error) {
-        logger.error(`Error getting value for key ${key}:`, error);
-        return defaultValue;
-    }
-}
-
-export async function setInDb(key, value, ttl = null) {
-    try {
-        await db.set(key, value, ttl);
-        return true;
-    } catch (error) {
-        logger.error(`Error setting value for key ${key}:`, error);
-        return false;
-    }
-}
-
-export async function deleteFromDb(key) {
-    try {
-        await db.delete(key);
-        return true;
-    } catch (error) {
-        logger.error(`Error deleting key ${key}:`, error);
-        return false;
-    }
-}
+import { db, getFromDb, setInDb } from './database/wrapper.js';
+import {
+    getGuildConfigKey,
+    getGuildBirthdaysKey,
+    getLevelingKey,
+    getUserLevelKey,
+    getApplicationRolesKey,
+    getApplicationSettingsKey,
+    getUserApplicationsKey,
+    getApplicationKey,
+    getJoinToCreateConfigKey,
+    getJoinToCreateChannelsKey,
+    getWelcomeConfigKey,
+    getEconomyKey,
+    getAFKKey,
+} from './database/keys.js';
 
 export async function insertVerificationAudit(record) {
     try {
@@ -240,9 +106,6 @@ export function unwrapReplitData(data) {
     }
     return data;
 }
-
-export const getGuildConfigKey = (guildId) => `guild:${guildId}:config`;
-export const getGuildBirthdaysKey = (guildId) => `guild:${guildId}:birthdays`;
 
 export async function getGuildConfig(client, guildId, context = {}) {
     try {
@@ -290,7 +153,7 @@ export async function setGuildConfig(client, guildId, config, context = {}) {
     }
 }
 
-export { DatabaseWrapper, pgDb };
+export { pgDb };
 
 export const getMessage = (key, replacements = {}) => {
     let message = BotConfig.messages[key] || key;
@@ -376,59 +239,6 @@ export function getMonthName(monthNum) {
     ];
     const index = Math.max(0, Math.min(monthNum - 1, 11));
     return monthNum >= 1 && monthNum <= 12 ? months[index] : 'Invalid Month';
-}
-
-export async function getGuildGiveaways(client, guildId) {
-    const key = giveawayKey(guildId);
-    try {
-        if (!client.db || typeof client.db.get !== "function") {
-            logger.error("Database client is not available for getGuildGiveaways.");
-            return {};
-        }
-
-        const giveaways = await client.db.get(key, {});
-        return unwrapReplitData(giveaways) || {};
-    } catch (error) {
-        logger.error(`Error getting giveaways for guild ${guildId}:`, error);
-        return {};
-    }
-}
-
-export async function saveGiveaway(client, guildId, giveawayData) {
-    try {
-        if (!client.db || typeof client.db.set !== "function") {
-            logger.error("Database client is not available for saveGiveaway.");
-            return false;
-        }
-
-        const key = giveawayKey(guildId);
-        const giveaways = await getGuildGiveaways(client, guildId);
-        
-        giveaways[giveawayData.messageId] = giveawayData;
-        
-        await client.db.set(key, giveaways);
-        return true;
-    } catch (error) {
-        logger.error('Error saving giveaway:', error);
-        return false;
-    }
-}
-
-export async function deleteGiveaway(client, guildId, messageId) {
-    try {
-        const key = giveawayKey(guildId);
-        const giveaways = await getGuildGiveaways(client, guildId);
-        
-        if (giveaways[messageId]) {
-            delete giveaways[messageId];
-            await client.db.set(key, giveaways);
-            return true;
-        }
-        return false;
-    } catch (error) {
-        logger.error('Error deleting giveaway:', error);
-        return false;
-    }
 }
 
 function isPostgresSqlReady(dbWrapper) {
@@ -555,139 +365,6 @@ export async function markGiveawayEnded(client, giveawayId, endedData) {
     }
 }
 
-export function giveawayKey(guildId) {
-    return `guild:${guildId}:giveaways`;
-}
-
-export const getGiveawaysKey = giveawayKey;
-
-export function getTicketKey(guildId, channelId) {
-    return `guild:${guildId}:ticket:${channelId}`;
-}
-
-export function getInviteTrackingKey(guildId) {
-    return `guild:${guildId}:invites`;
-}
-
-export function getMemberInvitesKey(guildId, userId) {
-    return `guild:${guildId}:invites:${userId}`;
-}
-
-export function getInviteUsesKey(guildId, inviteCode) {
-    return `guild:${guildId}:invite_uses:${inviteCode}`;
-}
-
-export function getFakeAccountKey(guildId, userId) {
-    return `guild:${guildId}:fake_account:${userId}`;
-}
-
-export async function getTicketData(guildId, channelId) {
-    if (!db.initialized) {
-        await db.initialize();
-    }
-
-    const key = getTicketKey(guildId, channelId);
-    return await db.get(key);
-}
-
-export async function getOpenTicketCountForUser(guildId, userId) {
-    try {
-        if (!db.initialized) {
-            await db.initialize();
-        }
-
-        if (db.db?.pool && typeof db.db.isAvailable === 'function' && db.db.isAvailable()) {
-            const { pgConfig } = await import('../config/postgres.js');
-            const result = await db.db.pool.query(
-                `SELECT COUNT(*)::int AS count FROM ${pgConfig.tables.tickets}
-                 WHERE guild_id = $1
-                   AND data->>'userId' = $2
-                   AND data->>'status' = 'open'`,
-                [guildId, userId]
-            );
-
-            return Number(result.rows?.[0]?.count || 0);
-        }
-
-        if (typeof db.list === 'function') {
-            const ticketKeys = await db.list(`guild:${guildId}:ticket:`);
-            let count = 0;
-
-            for (const key of ticketKeys) {
-                const ticket = await getFromDb(key, null);
-                if (ticket && ticket.userId === userId && ticket.status === 'open') {
-                    count += 1;
-                }
-            }
-
-            return count;
-        }
-
-        return 0;
-    } catch (error) {
-        logger.error(`Error counting open tickets for user ${userId} in guild ${guildId}:`, error);
-        return 0;
-    }
-}
-
-export async function saveTicketData(guildId, channelId, data) {
-    if (!db.initialized) {
-        await db.initialize();
-    }
-
-    const key = getTicketKey(guildId, channelId);
-    await db.set(key, data);
-}
-
-export async function deleteTicketData(guildId, channelId) {
-    if (!db.initialized) {
-        await db.initialize();
-    }
-
-    const key = getTicketKey(guildId, channelId);
-    await db.delete(key);
-}
-
-export function getTicketCounterKey(guildId) {
-    return `guild:${guildId}:ticket:counter`;
-}
-
-export async function getTicketCounter(guildId) {
-    if (!db.initialized) {
-        await db.initialize();
-    }
-
-    const key = getTicketCounterKey(guildId);
-    const counter = await db.get(key);
-    return counter || 0;
-}
-
-export async function incrementTicketCounter(guildId) {
-    if (!db.initialized) {
-        await db.initialize();
-    }
-
-    const key = getTicketCounterKey(guildId);
-    const currentCounter = await getTicketCounter(guildId);
-    const nextCounter = currentCounter + 1;
-    
-    await db.set(key, nextCounter);
-
-    return nextCounter.toString().padStart(3, '0');
-}
-
-export function getEconomyKey(guildId, userId) {
-    return `guild:${guildId}:economy:${userId}`;
-}
-
-export function getAFKKey(guildId, userId) {
-    return `guild:${guildId}:afk:${userId}`;
-}
-
-export function getWelcomeConfigKey(guildId) {
-    return `guild:${guildId}:welcome`;
-}
-
 function normalizeWelcomeConfig(raw = {}) {
     const base = typeof raw === "object" && raw !== null ? raw : {};
 
@@ -778,14 +455,6 @@ export async function updateWelcomeConfig(client, guildId, updates) {
         logger.error(`Error updating welcome config for guild ${guildId}:`, error);
         throw error;
     }
-}
-
-export function getLevelingKey(guildId) {
-    return `guild:${guildId}:leveling:config`;
-}
-
-export function getUserLevelKey(guildId, userId) {
-    return `guild:${guildId}:leveling:users:${userId}`;
 }
 
 export async function getLevelingConfig(client, guildId) {
@@ -952,10 +621,6 @@ rank: 0
     }
 }
 
-export function getApplicationRolesKey(guildId) {
-    return `guild:${guildId}:applications:roles`;
-}
-
 export async function getApplicationRoles(client, guildId) {
     try {
         if (!client.db || typeof client.db.get !== "function") {
@@ -987,18 +652,6 @@ export async function saveApplicationRoles(client, guildId, roles) {
         logger.error(`Error saving application roles for guild ${guildId}:`, error);
         return false;
     }
-}
-
-export function getApplicationSettingsKey(guildId) {
-    return `guild:${guildId}:applications:settings`;
-}
-
-export function getUserApplicationsKey(guildId, userId) {
-    return `guild:${guildId}:applications:users:${userId}`;
-}
-
-export function getApplicationKey(guildId, applicationId) {
-    return `guild:${guildId}:applications:${applicationId}`;
 }
 
 export async function getApplicationSettings(client, guildId) {
@@ -1407,293 +1060,6 @@ export async function getApplications(client, guildId, filters = {}) {
         logger.error(`Error getting applications for guild ${guildId}:`, error);
         return [];
     }
-}
-
-export function getModlogSettingsKey(guildId) {
-    return `guild:${guildId}:modlog:settings`;
-}
-
-export function getModlogEntryKey(guildId, caseId) {
-    return `guild:${guildId}:modlog:cases:${caseId}`;
-}
-
-export function getUserModlogKey(guildId, userId) {
-    return `guild:${guildId}:modlog:users:${userId}`;
-}
-
-export async function getModlogSettings(client, guildId) {
-    const key = getModlogSettingsKey(guildId);
-    try {
-        const settings = await client.db.get(key, {});
-        const unwrapped = unwrapReplitData(settings);
-        
-        const defaultSettings = {
-            enabled: false,
-            channelId: null,
-            ignoredChannels: [],
-            ignoredUsers: [],
-            ignoredActions: [],
-            logBans: true,
-            logKicks: true,
-            logMutes: true,
-            logWarns: true,
-            logMessageDeletes: false,
-            logMessageEdits: false,
-            logChannelUpdates: true,
-            logMemberUpdates: true,
-            logRoleUpdates: true,
-            logVoiceUpdates: true,
-            logEmojiUpdates: true,
-            logStickerUpdates: true,
-            logInviteCreates: true,
-            logInviteDeletes: true,
-            logWebhookUpdates: true,
-            logIntegrationUpdates: true,
-            logBotActions: true,
-            logPunishments: true,
-            logJoins: true,
-            logLeaves: true,
-            logNicknameChanges: true,
-            logRoleChanges: true,
-            logTimeoutAdds: true,
-            logTimeoutRemovals: true,
-            logThreadCreates: true,
-            logThreadDeletes: true,
-            logThreadUpdates: true,
-            logScheduledEvents: true,
-            logAutomod: true,
-            logStages: true,
-            logGuildUpdates: true,
-            logEmojiRoleUpdates: true,
-            logStickerRoleUpdates: true,
-            logStickerUpdates: true,
-            logIntegrationRoleUpdates: true,
-            logWebhookRoleUpdates: true,
-            logAutoModRuleUpdates: true,
-            logAutoModExecutions: true,
-            logScheduledEventUpdates: true,
-            logScheduledEventUsers: true,
-            logScheduledEventCreates: true,
-            logScheduledEventDeletes: true,
-            logScheduledEventUserAdds: true,
-            logScheduledEventUserRemoves: true,
-            logThreadMembers: true,
-            logThreadMembersUpdates: true,
-            logGuildScheduledEvents: true,
-            logGuildScheduledEventUsers: true,
-            logGuildScheduledEventCreates: true,
-            logGuildScheduledEventDeletes: true,
-            logGuildScheduledEventUserAdds: true,
-            logGuildScheduledEventUserRemoves: true,
-            logGuildScheduledEventUpdates: true,
-            logGuildScheduledEventUserUpdates: true,
-            logGuildScheduledEventUserAdd: true,
-            logGuildScheduledEventUserRemove: true,
-            logGuildScheduledEventUserUpdate: true,
-            logGuildScheduledEventCreate: true,
-            logGuildScheduledEventDelete: true,
-            logGuildScheduledEventUpdate: true,
-            logGuildScheduledEventUserAdds: true,
-            logGuildScheduledEventUserRemoves: true,
-            logGuildScheduledEventUserUpdates: true,
-            logGuildScheduledEventUsersAdd: true,
-            logGuildScheduledEventUsersRemove: true,
-            logGuildScheduledEventUsersUpdate: true,
-            logGuildScheduledEventUserAdd: true,
-            logGuildScheduledEventUserRemove: true,
-            logGuildScheduledEventUserUpdate: true,
-            logGuildScheduledEventUsersAdd: true,
-            logGuildScheduledEventUsersRemove: true,
-            logGuildScheduledEventUsersUpdate: true,
-            logGuildScheduledEventUserAdd: true,
-            logGuildScheduledEventUserRemove: true,
-            logGuildScheduledEventUserUpdate: true,
-            logGuildScheduledEventUsersAdd: true,
-            logGuildScheduledEventUsersRemove: true,
-            logGuildScheduledEventUsersUpdate: true,
-            logGuildScheduledEventUserAdd: true,
-            logGuildScheduledEventUserRemove: true,
-            logGuildScheduledEventUserUpdate: true,
-            logGuildScheduledEventUsersAdd: true,
-            logGuildScheduledEventUsersRemove: true,
-            logGuildScheduledEventUsersUpdate: true
-        };
-        
-        return { ...defaultSettings, ...unwrapped };
-    } catch (error) {
-        logger.error(`Error getting modlog settings for guild ${guildId}:`, error);
-        return {
-            enabled: false,
-            channelId: null,
-            ignoredChannels: [],
-            ignoredUsers: [],
-            ignoredActions: [],
-            logBans: true,
-            logKicks: true,
-            logMutes: true,
-            logWarns: true,
-            logMessageDeletes: false,
-            logMessageEdits: false,
-            logChannelUpdates: true,
-            logMemberUpdates: true,
-            logRoleUpdates: true,
-            logVoiceUpdates: true,
-            logEmojiUpdates: true,
-            logStickerUpdates: true,
-            logInviteCreates: true,
-            logInviteDeletes: true,
-            logWebhookUpdates: true,
-            logIntegrationUpdates: true,
-            logBotActions: true,
-            logPunishments: true,
-            logJoins: true,
-            logLeaves: true,
-            logNicknameChanges: true,
-            logRoleChanges: true,
-            logTimeoutAdds: true,
-            logTimeoutRemovals: true
-        };
-    }
-}
-
-export async function saveModlogSettings(client, guildId, settings) {
-    const key = getModlogSettingsKey(guildId);
-    try {
-        const existingSettings = await getModlogSettings(client, guildId);
-        const mergedSettings = { ...existingSettings, ...settings };
-        
-        await client.db.set(key, mergedSettings);
-        return true;
-    } catch (error) {
-        logger.error(`Error saving modlog settings for guild ${guildId}:`, error);
-        return false;
-    }
-}
-
-export async function createModlogEntry(client, entry) {
-    const { guildId, userId } = entry;
-    const caseId = generateCaseId();
-    const key = getModlogEntryKey(guildId, caseId);
-    
-    const newEntry = {
-        ...entry,
-        caseId,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-    };
-    
-    try {
-        await client.db.set(key, newEntry);
-        
-        const userKey = getUserModlogKey(guildId, userId);
-        const userEntries = await client.db.get(userKey, []);
-        
-        if (!userEntries.includes(caseId)) {
-            userEntries.push(caseId);
-            await client.db.set(userKey, userEntries);
-        }
-        
-        return newEntry;
-    } catch (error) {
-        logger.error(`Error creating modlog entry for user ${userId} in guild ${guildId}:`, error);
-        throw error;
-    }
-}
-
-export async function getModlogEntry(client, guildId, caseId) {
-    const key = getModlogEntryKey(guildId, caseId);
-    try {
-        const entry = await client.db.get(key, null);
-        return unwrapReplitData(entry);
-    } catch (error) {
-        logger.error(`Error getting modlog entry ${caseId} in guild ${guildId}:`, error);
-        return null;
-    }
-}
-
-export async function updateModlogEntry(client, guildId, caseId, updates) {
-    const key = getModlogEntryKey(guildId, caseId);
-    try {
-        const existingEntry = await getModlogEntry(client, guildId, caseId);
-        if (!existingEntry) {
-            throw new Error(`Modlog entry ${caseId} not found`);
-        }
-        
-        const updatedEntry = {
-            ...existingEntry,
-            ...updates,
-            updatedAt: Date.now()
-        };
-        
-        await client.db.set(key, updatedEntry);
-        return updatedEntry;
-    } catch (error) {
-        logger.error(`Error updating modlog entry ${caseId} in guild ${guildId}:`, error);
-        throw error;
-    }
-}
-
-export async function getUserModlogEntries(client, guildId, userId) {
-    const userKey = getUserModlogKey(guildId, userId);
-    try {
-        const caseIds = await client.db.get(userKey, []);
-        const entryPromises = caseIds.map(caseId => 
-            getModlogEntry(client, guildId, caseId)
-        );
-        
-        const entries = await Promise.all(entryPromises);
-        return entries.filter(Boolean);
-    } catch (error) {
-        logger.error(`Error getting modlog entries for user ${userId} in guild ${guildId}:`, error);
-        return [];
-    }
-}
-
-export async function getModlogEntries(client, guildId, filters = {}) {
-    const {
-        userId,
-        moderatorId,
-        action,
-        limit = 50,
-        offset = 0
-    } = filters;
-    
-    try {
-        const prefix = `guild:${guildId}:modlog:cases:`;
-        const keys = await client.db.list(prefix);
-        
-        const entryPromises = keys.map(key => client.db.get(key));
-        let entries = (await Promise.all(entryPromises))
-            .map(unwrapReplitData)
-            .filter(Boolean);
-        
-        if (userId) {
-            entries = entries.filter(entry => entry.userId === userId);
-        }
-        
-        if (moderatorId) {
-            entries = entries.filter(entry => entry.moderatorId === moderatorId);
-        }
-        
-        if (action) {
-            entries = entries.filter(entry => entry.action === action);
-        }
-        
-        entries.sort((a, b) => b.createdAt - a.createdAt);
-        
-        return entries.slice(offset, offset + limit);
-    } catch (error) {
-        logger.error(`Error getting modlog entries for guild ${guildId}:`, error);
-        return [];
-    }
-}
-
-export function getJoinToCreateConfigKey(guildId) {
-    return `guild:${guildId}:jointocreate`;
-}
-
-export function getJoinToCreateChannelsKey(guildId) {
-    return `guild:${guildId}:jointocreate:channels`;
 }
 
 export async function getJoinToCreateConfig(client, guildId) {

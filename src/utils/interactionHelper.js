@@ -2,7 +2,7 @@
 
 import { logger } from './logger.js';
 import { MessageFlags } from 'discord.js';
-import { handleInteractionError } from './errorHandler.js';
+import { handleInteractionError, createError, ErrorTypes } from './errorHandler.js';
 import { ResponseCoordinator } from './responseCoordinator.js';
 
 const INTERACTION_TIMEOUT_MS = 15 * 60 * 1000;
@@ -176,6 +176,20 @@ export class InteractionHelper {
                 logger.debug(`Interaction ${interaction.id} not replied, using reply fallback instead of edit:`, error.message);
                 return await this.safeReply(interaction, options);
             }
+            if (error.code === 10008) {
+                logger.debug(`Interaction ${interaction.id} reply message deleted, using followUp fallback`);
+                try {
+                    await interaction.followUp(options);
+                    return true;
+                } catch (followUpError) {
+                    if (isInteractionUnavailableError(followUpError)) {
+                        logger.warn(`Interaction ${interaction.id} unavailable during followUp:`, followUpError.message);
+                        return false;
+                    }
+                    logger.error('Failed to follow up after deleted reply:', followUpError);
+                    return false;
+                }
+            }
             logger.error('Failed to edit reply:', error);
             return false;
         }
@@ -289,26 +303,11 @@ export class InteractionHelper {
                 return;
             }
 
-            if (!errorEmbed) {
-                await handleInteractionError(interaction, error, { source: 'interactionHelper.safeExecute' });
-                return;
-            }
+            const errorToHandle = typeof errorEmbed === 'string'
+                ? createError(error.message || 'Command failed', ErrorTypes.UNKNOWN, errorEmbed, { expected: true })
+                : error;
 
-            let errorResponse;
-            if (typeof errorEmbed === 'string') {
-                const { errorEmbed: createErrorEmbed } = await import('./embeds.js');
-                errorResponse = { embeds: [createErrorEmbed(errorEmbed, error)] };
-            } else if (errorEmbed && typeof errorEmbed === 'object') {
-                errorResponse = { embeds: [errorEmbed] };
-            } else {
-                const { errorEmbed: createErrorEmbed } = await import('./embeds.js');
-                errorResponse = { embeds: [createErrorEmbed('Command execution failed.', error)] };
-            }
-
-            const editSuccess = await this.safeEditReply(interaction, errorResponse);
-            if (!editSuccess) {
-                logger.warn(`Failed to send error response for interaction ${interaction.id}, interaction may have expired`);
-            }
+            await handleInteractionError(interaction, errorToHandle, { source: 'interactionHelper.safeExecute' });
         }
     }
 
@@ -338,14 +337,14 @@ export class InteractionHelper {
     }
 }
 
-export function withErrorHandling(target, propertyName, descriptor) {
+export function withSafeExecuteDecorator(target, propertyName, descriptor) {
     const originalMethod = descriptor.value;
 
     descriptor.value = async function(interaction, config, client) {
         await InteractionHelper.safeExecute(
             interaction,
             () => originalMethod.call(this, interaction, config, client),
-            { title: 'Command Error', description: 'Failed to execute command. Please try again later.' },
+            null,
             { autoDefer: !interaction._isPrefixCommand },
         );
     };

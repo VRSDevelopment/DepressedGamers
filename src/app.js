@@ -12,6 +12,8 @@ import { logger, startupLog, shutdownLog } from './utils/logger.js';
 import { checkBirthdays } from './services/birthdayService.js';
 import { checkGiveaways } from './services/giveawayService.js';
 import { loadCommands, registerCommands as registerSlashCommands } from './handlers/commandLoader.js';
+import pkg from '../package.json' with { type: 'json' };
+import { EXPECTED_SCHEMA_VERSION, EXPECTED_SCHEMA_LABEL } from './config/schemaVersion.js';
 
 class TitanBot extends Client {
   constructor() {
@@ -85,6 +87,11 @@ class TitanBot extends Client {
       
       startupLog('Registering slash commands...');
       await this.registerCommands();
+      if (this.config.bot.multiGuild) {
+        startupLog('Multi-guild mode enabled — slash commands registered globally');
+      } else if (this.config.bot.guildId) {
+        startupLog(`Single-guild mode — slash commands registered for guild ${this.config.bot.guildId}`);
+      }
       startupLog('Slash commands registration complete');
       
       const databaseMode = dbStatus.isDegraded
@@ -165,26 +172,40 @@ class TitanBot extends Client {
     });
 
     app.get('/ready', (req, res) => {
-      const dbStatus = this.db?.getStatus?.() || { isDegraded: true };
+      const dbStatus = this.db?.getStatus?.() || { isDegraded: true, connectionType: 'none' };
       const isReady = this.isReady() && !dbStatus.isDegraded;
+
+      const metrics = {
+        guildCount: this.guilds?.cache?.size ?? 0,
+        commandCount: this.commands?.size ?? 0,
+        database: {
+          mode: dbStatus.connectionType,
+          degraded: dbStatus.isDegraded,
+          degradedReason: dbStatus.degradedReason ?? null,
+        },
+        schemaVersion: EXPECTED_SCHEMA_VERSION,
+        schemaLabel: EXPECTED_SCHEMA_LABEL,
+      };
 
       if (isReady) {
         return res.status(200).json({
           ready: true,
-          message: 'Bot is ready'
+          message: 'Bot is ready',
+          metrics,
         });
       }
 
       res.status(503).json({
         ready: false,
-        reason: !this.isReady() ? 'Bot not Ready' : 'Database degraded'
+        reason: !this.isReady() ? 'Bot not Ready' : 'Database degraded',
+        metrics,
       });
     });
 
     app.get('/', (req, res) => {
       res.status(200).json({ 
         message: 'TitanBot System Online',
-        version: '2.0.0',
+        version: pkg.version,
         timestamp: new Date().toISOString()
       });
     });
@@ -303,7 +324,8 @@ class TitanBot extends Client {
 
   async registerCommands() {
     try {
-      await registerSlashCommands(this, this.config.bot.guildId);
+      const { clientId, guildId, multiGuild } = this.config.bot;
+      await registerSlashCommands(this, { clientId, guildId, multiGuild });
     } catch (error) {
       logger.error('Error registering commands:', error);
     }

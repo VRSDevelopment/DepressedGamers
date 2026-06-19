@@ -4,9 +4,8 @@ import { getGuildConfig } from '../services/guildConfig.js';
 import { handleApplicationModal } from '../commands/Community/apply.js';
 import { handleApplicationReviewModal } from '../commands/Community/app-admin.js';
 import { handleInteractionError, createError, ErrorTypes } from '../utils/errorHandler.js';
-import { MessageTemplates } from '../utils/messageTemplates.js';
 import { InteractionHelper } from '../utils/interactionHelper.js';
-import { createInteractionTraceContext, runWithTraceContext } from '../utils/traceContext.js';
+import { createInteractionTraceContext, runWithTraceContext } from '../utils/logger.js';
 import { validateChatInputPayloadOrThrow } from '../utils/commandInputValidation.js';
 import { enforceAbuseProtection, formatCooldownDuration } from '../utils/abuseProtection.js';
 import { isCommandEnabled } from '../services/commandAccessService.js';
@@ -344,7 +343,12 @@ export default {
             return;
           }
 
-          if (interaction.customId.startsWith('jtc_') || interaction.customId.startsWith('config_wizard_modal:')) {
+          if (
+            interaction.customId.startsWith('jtc_')
+            || interaction.customId.startsWith('config_wizard_modal:')
+            || interaction.customId.startsWith('log_dash_channel_modal:')
+            || interaction.customId.startsWith('log_dash_filter_modal:')
+          ) {
             logger.debug(`Skipping modal handler lookup for inline-awaited modal: ${interaction.customId}`, {
               event: 'interaction.modal.inline_skipped',
               traceId: interactionTraceContext.traceId
@@ -391,21 +395,12 @@ export default {
         });
 
         try {
-          const ephemeralErrorMessage = {
-            embeds: [MessageTemplates.ERRORS.DATABASE_ERROR('processing your interaction')],
-            flags: MessageFlags.Ephemeral
-          };
-          const editErrorMessage = {
-            embeds: [MessageTemplates.ERRORS.DATABASE_ERROR('processing your interaction')]
-          };
-
-          if (interaction.deferred) {
-            await interaction.editReply(editErrorMessage);
-          } else if (interaction.replied) {
-            await interaction.followUp(ephemeralErrorMessage);
-          } else {
-            await interaction.reply(ephemeralErrorMessage);
-          }
+          await handleInteractionError(interaction, error, withTraceContext({
+            type: 'interaction',
+            commandName: interaction.commandName,
+            customId: interaction.customId,
+            source: 'interactionCreate.unhandled'
+          }, interactionTraceContext));
         } catch (replyError) {
           logger.error('Failed to send fallback error response:', {
             event: 'interaction.error_response_failed',

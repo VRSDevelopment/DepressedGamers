@@ -5,40 +5,17 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  EmbedBuilder,
   PermissionFlagsBits,
   AttachmentBuilder,
 } from 'discord.js';
+import { buildStandardLogEmbed, formatLogLine } from '../utils/logEmbeds.js';
 import { getGuildConfig } from './guildConfig.js';
 import { getTicketData, saveTicketData, deleteTicketData, getOpenTicketCountForUser, incrementTicketCounter } from '../utils/database.js';
 import { logger } from '../utils/logger.js';
 import { createEmbed, errorEmbed } from '../utils/embeds.js';
 import { logTicketEvent } from '../utils/ticketLogging.js';
-import { BotConfig } from '../config/bot.js';
 import { ensureTypedServiceError } from '../utils/serviceErrorBoundary.js';
-
-function getPriorityMap() {
-  const priorities = BotConfig.tickets?.priorities || {
-    none: { emoji: "⚪", color: "#95A5A6", label: "None" },
-    low: { emoji: "🟢", color: "#2ECC71", label: "Low" },
-    medium: { emoji: "🟡", color: "#F1C40F", label: "Medium" },
-    high: { emoji: "🔴", color: "#E74C3C", label: "High" },
-    urgent: { emoji: "🚨", color: "#E91E63", label: "Urgent" },
-  };
-  
-  const map = {};
-  for (const [key, config] of Object.entries(priorities)) {
-    map[key] = {
-      name: `${config.emoji} ${config.label.toUpperCase()}`,
-      color: config.color,
-      emoji: config.emoji,
-      label: config.label,
-    };
-  }
-  return map;
-}
-
-const PRIORITY_MAP = getPriorityMap();
+import { PRIORITY_MAP } from '../utils/helpers.js';
 const TICKET_DELETE_DELAY_MS = 3000;
 const TICKET_DELETE_DELAY_SECONDS = Math.floor(TICKET_DELETE_DELAY_MS / 1000);
 
@@ -872,22 +849,19 @@ export async function deleteTicket(channel, deleter) {
                 });
               } else {
                 
-                const transcriptEmbed = new EmbedBuilder()
-                  .setTitle('📜 Ticket Transcript')
-                  .setDescription(`Transcript for ticket #${ticketData.id}`)
-                  .setColor('#3498db')
-                  .addFields(
-                    { name: 'Ticket ID', value: `\`${ticketData.id}\``, inline: true },
-                    { name: 'Channel', value: `#${channel.name}`, inline: true },
-                    { name: 'Generated', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: false }
-                  );
-
-                if (deleter?.username) {
-                  transcriptEmbed.setFooter({ 
-                    text: `Deleted by: ${deleter.username}`, 
-                    iconURL: deleter.displayAvatarURL?.() 
-                  });
-                }
+                const transcriptEmbed = buildStandardLogEmbed({
+                  color: 0x3498db,
+                  title: 'Ticket Transcript',
+                  description: [
+                    formatLogLine('Ticket', `#${ticketData.id}`),
+                    formatLogLine('Channel', `#${channel.name}`),
+                    formatLogLine('Generated', `<t:${Math.floor(Date.now() / 1000)}:F>`),
+                  ].join('\n'),
+                  footer: deleter?.username
+                    ? { text: `Deleted by ${deleter.username}`, iconURL: deleter.displayAvatarURL?.() }
+                    : undefined,
+                  timestamp: true,
+                });
 
                 await transcriptChannel.send({
                   embeds: [transcriptEmbed],
