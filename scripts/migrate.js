@@ -183,6 +183,15 @@ const createTables = async (client) => {
       target_id VARCHAR(255),
       reason TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS ai_configs (
+      guild_id VARCHAR(255) PRIMARY KEY,
+      channel_id VARCHAR(255),
+      enabled BOOLEAN DEFAULT false,
+      system_prompt TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`
   ];
 
@@ -260,6 +269,10 @@ const createTriggers = async (client) => {
     {
       table: 'counters',
       name: 'update_counters_timestamp'
+    },
+    {
+      table: 'ai_configs',
+      name: 'update_ai_configs_timestamp'
     }
   ];
 
