@@ -1,25 +1,7 @@
-import { GoogleGenAI } from '@google/genai';
+import axios from 'axios';
 import { PermissionsBitField } from 'discord.js';
 import { logger } from '../utils/logger.js';
 import { pgDb } from '../utils/database.js';
-
-let aiClient = null;
-
-export const initAIClient = () => {
-  if (!process.env.GEMINI_API_KEY) {
-    logger.warn('GEMINI_API_KEY is not set in the environment variables. AI features will be disabled.');
-    return false;
-  }
-  
-  try {
-    // Initialize the new SDK
-    aiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    return true;
-  } catch (error) {
-    logger.error('Failed to initialize Google Gen AI client:', error);
-    return false;
-  }
-};
 
 export const getAIConfig = async (guildId) => {
   try {
@@ -57,13 +39,33 @@ export const saveAIConfig = async (guildId, config) => {
 const conversationHistory = new Map();
 const MAX_HISTORY_LENGTH = 10;
 
+// Helper to make OpenRouter API calls
+const callOpenRouter = async (messages) => {
+  const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
+    // You can change this to any free model on OpenRouter!
+    // Check https://openrouter.ai/models?max_price=0 for free models
+    model: 'google/gemini-2.0-flash-exp:free', 
+    messages: messages
+  }, {
+    headers: {
+      'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      'HTTP-Referer': 'https://github.com/VRSDevelopment/DepressedGamers',
+      'X-Title': 'DepressedGamers Bot',
+      'Content-Type': 'application/json'
+    }
+  });
+
+  if (response.data && response.data.choices && response.data.choices.length > 0) {
+    return response.data.choices[0].message.content;
+  }
+  throw new Error('Invalid response from OpenRouter');
+};
+
 export const generateAIResponse = async (message, userMessage, systemPrompt) => {
   const guildId = message.guild.id;
 
-  if (!aiClient) {
-    if (!initAIClient()) {
-       return "Sorry, the AI feature is currently unavailable (API key missing).";
-    }
+  if (!process.env.OPENROUTER_API_KEY) {
+     return "Sorry, the AI feature is currently unavailable (OPENROUTER_API_KEY missing).";
   }
 
   try {
@@ -80,31 +82,21 @@ export const generateAIResponse = async (message, userMessage, systemPrompt) => 
     // Add ability instructions
     promptInstructions += "\n\nSPECIAL ABILITY: If the user explicitly asks you to kick someone from a voice channel, output EXACTLY this format and nothing else: [KICK_VOICE: username]. The system will intercept this, perform the action, and return the result to you so you can confirm to the user.";
 
-    const contents = [];
+    const messages = [];
+    messages.push({ role: 'system', content: promptInstructions });
     
-    // Convert history into contents array for Gemini
+    // Convert history into contents array for OpenRouter
     for (const msg of history) {
-      contents.push({
-        role: msg.role === 'user' ? 'user' : 'model',
-        parts: [{ text: msg.content }]
+      messages.push({
+        role: msg.role === 'user' ? 'user' : 'assistant',
+        content: msg.content
       });
     }
     
     // Add current user message
-    contents.push({
-      role: 'user',
-      parts: [{ text: userMessage }]
-    });
+    messages.push({ role: 'user', content: userMessage });
 
-    let response = await aiClient.models.generateContent({
-        model: 'gemini-1.5-flash-8b',
-        contents: contents,
-        config: {
-            systemInstruction: promptInstructions,
-        }
-    });
-
-    let reply = response.text;
+    let reply = await callOpenRouter(messages);
 
     // Check for interception abilities
     if (reply.includes('[KICK_VOICE:')) {
@@ -131,38 +123,23 @@ export const generateAIResponse = async (message, userMessage, systemPrompt) => 
               await targetMember.voice.disconnect(`Kicked by AI upon request from ${message.author.tag}`);
               
               // Ask AI to generate final response confirming the kick
-              contents.push({ role: 'model', parts: [{ text: reply }] });
-              contents.push({ role: 'user', parts: [{ text: `SYSTEM LOG: Successfully disconnected ${targetMember.user.username} from their voice channel. Please confirm to the user.` }] });
+              messages.push({ role: 'assistant', content: reply });
+              messages.push({ role: 'user', content: `SYSTEM LOG: Successfully disconnected ${targetMember.user.username} from their voice channel. Please confirm to the user.` });
               
-              const followup = await aiClient.models.generateContent({
-                  model: 'gemini-1.5-flash-8b',
-                  contents: contents,
-                  config: { systemInstruction: promptInstructions }
-              });
-              reply = followup.text;
+              reply = await callOpenRouter(messages);
             } catch (kickError) {
               logger.error('Failed to kick user from voice:', kickError);
-              contents.push({ role: 'model', parts: [{ text: reply }] });
-              contents.push({ role: 'user', parts: [{ text: `SYSTEM LOG: I failed to disconnect the user due to a permission error: ${kickError.message}. The bot probably lacks 'Move Members' permission. Please apologize and tell the user.` }] });
+              messages.push({ role: 'assistant', content: reply });
+              messages.push({ role: 'user', content: `SYSTEM LOG: I failed to disconnect the user due to a permission error: ${kickError.message}. The bot probably lacks 'Move Members' permission. Please apologize and tell the user.` });
               
-              const followup = await aiClient.models.generateContent({
-                  model: 'gemini-1.5-flash-8b',
-                  contents: contents,
-                  config: { systemInstruction: promptInstructions }
-              });
-              reply = followup.text;
+              reply = await callOpenRouter(messages);
             }
           } else {
             // Ask AI to tell the user the person wasn't found
-            contents.push({ role: 'model', parts: [{ text: reply }] });
-            contents.push({ role: 'user', parts: [{ text: `SYSTEM LOG: Could not find any user matching "${targetUsername}" in any voice channel. Please tell the user.` }] });
+            messages.push({ role: 'assistant', content: reply });
+            messages.push({ role: 'user', content: `SYSTEM LOG: Could not find any user matching "${targetUsername}" in any voice channel. Please tell the user.` });
             
-            const followup = await aiClient.models.generateContent({
-                model: 'gemini-1.5-flash-8b',
-                contents: contents,
-                config: { systemInstruction: promptInstructions }
-            });
-            reply = followup.text;
+            reply = await callOpenRouter(messages);
           }
         }
       }
@@ -170,16 +147,24 @@ export const generateAIResponse = async (message, userMessage, systemPrompt) => 
 
     // Update history
     history.push({ role: 'user', content: userMessage });
-    history.push({ role: 'model', content: reply });
+    history.push({ role: 'assistant', content: reply });
 
-    // Keep history length bounded
+    // Keep history from getting too long
     if (history.length > MAX_HISTORY_LENGTH * 2) {
-      history.splice(0, history.length - (MAX_HISTORY_LENGTH * 2));
+      // Remove oldest pair (user + model)
+      history.splice(0, 2);
     }
 
     return reply;
+    
   } catch (error) {
-    logger.error('Error generating AI response:', error);
+    logger.error('Error generating AI response via OpenRouter:', error);
+    
+    // Check for rate limit
+    if (error.response && error.response.status === 429) {
+      return "I'm currently receiving too many requests. Please wait a moment and try again.";
+    }
+    
     return "I'm sorry, I encountered an error while trying to generate a response.";
   }
 };
