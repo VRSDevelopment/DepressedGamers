@@ -228,6 +228,8 @@ async function handleLeveling(message, client) {
   }
 }
 
+const activeAiSessions = new Set();
+
 async function handleAIChat(message, client) {
   try {
     const config = await getAIConfig(message.guild.id);
@@ -236,20 +238,42 @@ async function handleAIChat(message, client) {
     const isAiChannel = config.channel_id && message.channel.id === config.channel_id;
     const isBotMentioned = message.mentions.has(client.user);
 
-    if (!isAiChannel && !isBotMentioned) return false;
-
     const content = message.content.replace(new RegExp(`<@!?${client.user.id}>`, 'g'), '').trim();
     if (!content) return false;
 
-    await message.channel.sendTyping();
+    const lowerContent = content.toLowerCase();
+    const sessionKey = `${message.guild.id}-${message.channel.id}`;
 
-    const response = await generateAIResponse(message.guild.id, content, config.system_prompt);
+    const isWakeWord = /\bdg\b/i.test(lowerContent);
+    const isSleepWord = /^(thanks|alright|ok bye|bye|goodbye|cya|see ya|ok|okay)\b/i.test(lowerContent) || 
+                        /\b(thanks dg|bye dg|alright dg|ok dg)\b/i.test(lowerContent);
 
-    // If the response is over 2000 chars, we need to split it, but for now we'll just substring it to be safe
-    const safeResponse = response.length > 2000 ? response.substring(0, 1997) + '...' : response;
+    if (isAiChannel || isBotMentioned) {
+      if (isWakeWord) {
+        activeAiSessions.add(sessionKey);
+      } else if (!activeAiSessions.has(sessionKey) && !isBotMentioned) {
+        // If the bot isn't active in this channel, wasn't just woken up, and wasn't mentioned, ignore the message
+        return false;
+      }
 
-    await message.reply({ content: safeResponse });
-    return true;
+      await message.channel.sendTyping();
+
+      const response = await generateAIResponse(message.guild.id, content, config.system_prompt);
+
+      // If the response is over 2000 chars, we need to split it, but for now we'll just substring it to be safe
+      const safeResponse = response.length > 2000 ? response.substring(0, 1997) + '...' : response;
+
+      await message.reply({ content: safeResponse });
+
+      // Put the bot to sleep in this channel if a sleep word was used
+      if (isSleepWord) {
+        activeAiSessions.delete(sessionKey);
+      }
+
+      return true;
+    }
+
+    return false;
   } catch (error) {
     logger.error('Error handling AI chat:', error);
     return false;
