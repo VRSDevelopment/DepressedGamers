@@ -258,7 +258,7 @@ async function handleAIChat(message, client) {
 
       await message.channel.sendTyping();
 
-      const response = await generateAIResponse(message.guild.id, content, config.system_prompt);
+      const response = await generateAIResponse(message, content, config.system_prompt);
 
       // If the response is over 2000 chars, we need to split it, but for now we'll just substring it to be safe
       const safeResponse = response.length > 2000 ? response.substring(0, 1997) + '...' : response;
