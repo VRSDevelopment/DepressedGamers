@@ -127,18 +127,31 @@ export const generateAIResponse = async (message, userMessage, systemPrompt) => 
           }
 
           if (targetMember) {
-            await targetMember.voice.disconnect(`Kicked by AI upon request from ${message.author.tag}`);
-            
-            // Ask AI to generate final response confirming the kick
-            contents.push({ role: 'model', parts: [{ text: reply }] });
-            contents.push({ role: 'user', parts: [{ text: `SYSTEM LOG: Successfully disconnected ${targetMember.user.username} from their voice channel. Please confirm to the user.` }] });
-            
-            const followup = await aiClient.models.generateContent({
-                model: 'gemini-2.5-flash',
-                contents: contents,
-                config: { systemInstruction: promptInstructions }
-            });
-            reply = followup.text;
+            try {
+              await targetMember.voice.disconnect(`Kicked by AI upon request from ${message.author.tag}`);
+              
+              // Ask AI to generate final response confirming the kick
+              contents.push({ role: 'model', parts: [{ text: reply }] });
+              contents.push({ role: 'user', parts: [{ text: `SYSTEM LOG: Successfully disconnected ${targetMember.user.username} from their voice channel. Please confirm to the user.` }] });
+              
+              const followup = await aiClient.models.generateContent({
+                  model: 'gemini-2.5-flash',
+                  contents: contents,
+                  config: { systemInstruction: promptInstructions }
+              });
+              reply = followup.text;
+            } catch (kickError) {
+              logger.error('Failed to kick user from voice:', kickError);
+              contents.push({ role: 'model', parts: [{ text: reply }] });
+              contents.push({ role: 'user', parts: [{ text: `SYSTEM LOG: I failed to disconnect the user due to a permission error: ${kickError.message}. The bot probably lacks 'Move Members' permission. Please apologize and tell the user.` }] });
+              
+              const followup = await aiClient.models.generateContent({
+                  model: 'gemini-2.5-flash',
+                  contents: contents,
+                  config: { systemInstruction: promptInstructions }
+              });
+              reply = followup.text;
+            }
           } else {
             // Ask AI to tell the user the person wasn't found
             contents.push({ role: 'model', parts: [{ text: reply }] });
