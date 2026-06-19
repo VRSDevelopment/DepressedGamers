@@ -34,7 +34,7 @@ export default {
                         .setRequired(true))),
 
     async execute(interaction) {
-        const deferSuccess = await InteractionHelper.safeDefer(interaction, true);
+        const deferSuccess = await InteractionHelper.safeDefer(interaction, { ephemeral: true });
         if (!deferSuccess) return;
 
         try {
